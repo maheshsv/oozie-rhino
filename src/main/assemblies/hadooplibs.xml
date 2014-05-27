@@ -33,5 +33,9 @@
             <directory>${basedir}/../hadooplibs/hadoop-2/target/hadooplibs</directory>
             <outputDirectory>/hadooplibs</outputDirectory>
         </fileSet>
+        <fileSet>
+            <directory>${basedir}/../hadooplibs/hadoop-3/target/hadooplibs</directory>
+            <outputDirectory>/hadooplibs</outputDirectory>
+        </fileSet>
     </fileSets>
 </assembly>

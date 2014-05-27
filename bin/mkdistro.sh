@@ -68,7 +68,7 @@ setRevUrl
 MVN_OPTS="-Dbuild.time=${DATETIME} -Dvc.revision=${VC_REV} -Dvc.url=${VC_URL} -DgenerateDocs"
 
 export DATETIME2=`date -u "+%Y%m%d-%H%M%SGMT"`
-mvn clean package assembly:single ${MVN_OPTS} "$@"
+mvn -Dhttp.proxyHost=proxy01.cd.intel.com -Dhttp.proxyPort=911 -Dhttps.proxyHost=proxy01.cd.intel.com -Dhttps.proxyPort=911 -DskipTests clean package -Phadoop-3 assembly:single ${MVN_OPTS} "$@"
 
 if [ "$?" != "0" ]; then
   echo

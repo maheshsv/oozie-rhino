@@ -65,6 +65,15 @@ public class HadoopAccessorService implements Service {
     public static final String KERBEROS_AUTH_ENABLED = CONF_PREFIX + "kerberos.enabled";
     public static final String KERBEROS_KEYTAB = CONF_PREFIX + "keytab.file";
     public static final String KERBEROS_PRINCIPAL = CONF_PREFIX + "kerberos.principal";
+    public static final String TOKENAUTH_AUTH_ENABLED = CONF_PREFIX + "tokenauth.enabled";
+    public static final String TOKENAUTH_AUTHN_FILE = CONF_PREFIX + "tokenauth.authentication.file";
+    public static final String TOKENAUTH_PRINCIPAL = CONF_PREFIX + "tokenauth.principal";
+
+    public static final String IDENTITY_RPC_SERVER = CONF_PREFIX + "identity.server.rpc-address";
+    public static final String IDENTITY_HTTP_SERVER = CONF_PREFIX + "identity.server.http-address";
+    public static final String AUTHZ_RPC_SERVER = CONF_PREFIX + "authorization.server.rpc-address";
+    public static final String AUTHZ_HTTP_SERVER = CONF_PREFIX + "authorization.server.http-address";
+
     public static final Text MR_TOKEN_ALIAS = new Text("oozie mr token");
 
     protected static final String OOZIE_HADOOP_ACCESSOR_SERVICE_CREATED = "oozie.HadoopAccessorService.created";
@@ -122,11 +131,17 @@ public class HadoopAccessorService implements Service {
                         + ", Total entries :" + nameNodeWhitelist.size());
 
         boolean kerberosAuthOn = conf.getBoolean(KERBEROS_AUTH_ENABLED, true);
+        boolean tokenAuthOn = conf.getBoolean(TOKENAUTH_AUTH_ENABLED, true);
         XLog.getLog(getClass()).info("Oozie Kerberos Authentication [{0}]", (kerberosAuthOn) ? "enabled" : "disabled");
+        XLog.getLog(getClass()).info("Oozie TokenAuth Authentication [{0}]", (tokenAuthOn) ? "enabled" : "disabled");
+        if (kerberosAuthOn && tokenAuthOn) {
+            throw new ServiceException(ErrorCode.E0100, getClass().getName(), "Kerberos and TokenAuth can't enabled at the same time.");
+        }
         if (kerberosAuthOn) {
             kerberosInit(conf);
-        }
-        else {
+        } else if (tokenAuthOn) {
+            tokenAuthInit(conf);
+        } else {
             Configuration ugiConf = new Configuration();
             ugiConf.set("hadoop.security.authentication", "simple");
             UserGroupInformation.setConfiguration(ugiConf);
@@ -181,6 +196,52 @@ public class HadoopAccessorService implements Service {
             catch (Exception ex) {
                 throw new ServiceException(ErrorCode.E0100, getClass().getName(), ex.getMessage(), ex);
             }
+    }
+
+    private void tokenAuthInit(Configuration serviceConf) throws ServiceException {
+      try {
+        String authnFile = serviceConf.get(TOKENAUTH_AUTHN_FILE,
+            System.getProperty("user.home") + "/oozie.sso").trim();
+        if (authnFile.length() == 0) {
+          throw new ServiceException(ErrorCode.E0026, TOKENAUTH_AUTHN_FILE);
+        }
+        String principal = serviceConf.get(TOKENAUTH_PRINCIPAL, "oozie");
+        if (principal.length() == 0) {
+          throw new ServiceException(ErrorCode.E0026, TOKENAUTH_PRINCIPAL);
+        }
+        String identityRPCServer = serviceConf.get(IDENTITY_RPC_SERVER);
+        if (identityRPCServer.length() == 0) {
+          throw new ServiceException(ErrorCode.E0026, IDENTITY_RPC_SERVER);
+        }
+        String identityHTTPServer = serviceConf.get(IDENTITY_HTTP_SERVER);
+        if (identityHTTPServer.length() == 0) {
+          throw new ServiceException(ErrorCode.E0026, IDENTITY_HTTP_SERVER);
+        }
+        String authzRPCServer = serviceConf.get(AUTHZ_RPC_SERVER);
+        if (authzRPCServer.length() == 0) {
+          throw new ServiceException(ErrorCode.E0026, AUTHZ_RPC_SERVER);
+        }
+        String authzHTTPServer = serviceConf.get(AUTHZ_HTTP_SERVER);
+        if (authzHTTPServer.length() == 0) {
+          throw new ServiceException(ErrorCode.E0026, AUTHZ_HTTP_SERVER);
+        }
+        Configuration conf = new Configuration();
+        conf.set("hadoop.security.authentication", "tokenauth");
+        conf.set("hadoop.security.identity.server.rpc-address",identityRPCServer);
+        conf.set("hadoop.security.identity.server.http-address",identityHTTPServer);
+        conf.set("hadoop.security.authorization.server.rpc-address",authzRPCServer);
+        conf.set("hadoop.security.authorization.server.http-address",authzHTTPServer);
+        UserGroupInformation.setConfiguration(conf);
+        UserGroupInformation.loginUserFromAuthnFile(principal, authnFile);
+        XLog.getLog(getClass()).info("Got TokenAuth Login, authnFile [{0}], Oozie principal principal [{1}]",
+            authnFile, principal);
+      }
+      catch (ServiceException ex) {
+        throw ex;
+      }
+      catch (Exception ex) {
+        throw new ServiceException(ErrorCode.E0100, getClass().getName(), ex.getMessage(), ex);
+      }
     }
 
     private static final String[] HADOOP_CONF_FILES =

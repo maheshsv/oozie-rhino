@@ -69,7 +69,7 @@
         </oozie.test.default.config.file>
         <oozie.test.config.file>${oozie.test.default.config.file}</oozie.test.config.file>
 
-        <hadoop.version>1.1.1</hadoop.version>
+        <hadoop.version>3.0.0-SNAPSHOT</hadoop.version>
         <hbase.version>0.94.2</hbase.version>
         <hcatalog.version>0.5.0</hcatalog.version>
 
@@ -82,10 +82,10 @@
         This is required while we support a a pre 0.23 version of Hadoop which does not have
         the hadoop-auth artifact. After we phase-out pre 0.23 we can get rid of this property.
         -->
-        <hadoop.auth.version>2.0.2-alpha</hadoop.auth.version>
+        <hadoop.auth.version>3.0.0-SNAPSHOT</hadoop.auth.version>
 
          <!-- Sharelib component versions -->
-         <hive.version>0.10.0</hive.version>
+         <hive.version>0.12.0</hive.version>
          <pig.version>0.12.1</pig.version>
          <pig.classifier></pig.classifier>
          <sqoop.version>1.4.3</sqoop.version>
@@ -1137,7 +1137,7 @@
         <profile>
             <id>hadoop-3</id>
             <activation>
-                <activeByDefault>false</activeByDefault>
+                <activeByDefault>true</activeByDefault>
             </activation>
             <properties>
                <hadoop.version>3.0.0-SNAPSHOT</hadoop.version>

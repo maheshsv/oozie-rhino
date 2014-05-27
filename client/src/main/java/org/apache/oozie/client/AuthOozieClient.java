@@ -28,11 +28,15 @@ import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.hadoop.security.authentication.client.AbstractAuthenticator;
 import org.apache.hadoop.security.authentication.client.AuthenticatedURL;
 import org.apache.hadoop.security.authentication.client.AuthenticationException;
 import org.apache.hadoop.security.authentication.client.Authenticator;
 import org.apache.hadoop.security.authentication.client.KerberosAuthenticator;
 import org.apache.hadoop.security.authentication.client.PseudoAuthenticator;
+import org.apache.hadoop.security.tokenauth.has.HASClient;
+import org.apache.hadoop.security.tokenauth.has.HASClientImpl;
+import org.apache.hadoop.security.tokenauth.web.TokenAuthAuthenticator;
 
 /**
  * This subclass of {@link XOozieClient} supports Kerberos HTTP SPNEGO and simple authentication.
@@ -58,10 +62,12 @@ public class AuthOozieClient extends XOozieClient {
     public static final File AUTH_TOKEN_CACHE_FILE = new File(System.getProperty("user.home"), ".oozie-auth-token");
 
     public static enum AuthType {
-        KERBEROS, SIMPLE
+        KERBEROS, SIMPLE, TOKENAUTH
     }
 
     private String authOption = null;
+    private String identityHttp = null;
+    private String authzHttp = null;
 
     /**
      * Create an instance of the AuthOozieClient.
@@ -69,7 +75,7 @@ public class AuthOozieClient extends XOozieClient {
      * @param oozieUrl the Oozie URL
      */
     public AuthOozieClient(String oozieUrl) {
-        this(oozieUrl, null);
+        this(oozieUrl, null, null, null);
     }
 
     /**
@@ -78,9 +84,12 @@ public class AuthOozieClient extends XOozieClient {
      * @param oozieUrl the Oozie URL
      * @param authOption the auth option
      */
-    public AuthOozieClient(String oozieUrl, String authOption) {
+    public AuthOozieClient(String oozieUrl, String authOption, String identityRpc,
+                           String authzRpc) {
         super(oozieUrl);
         this.authOption = authOption;
+        this.identityHttp = identityRpc;
+        this.authzHttp = authzRpc;
     }
 
     /**
@@ -102,27 +111,27 @@ public class AuthOozieClient extends XOozieClient {
     @Override
     protected HttpURLConnection createConnection(URL url, String method) throws IOException, OozieClientException {
         boolean useAuthFile = System.getProperty(USE_AUTH_TOKEN_CACHE_SYS_PROP, "false").equalsIgnoreCase("true");
-        AuthenticatedURL.Token readToken = new AuthenticatedURL.Token();
-        AuthenticatedURL.Token currentToken = new AuthenticatedURL.Token();
-
+        String readAuthCookies = null;
+        String currentAuthCookies = null;
         if (useAuthFile) {
-            readToken = readAuthToken();
-            if (readToken != null) {
-                currentToken = new AuthenticatedURL.Token(readToken.toString());
+            readAuthCookies = readAuthCookies();
+            if (readAuthCookies != null) {
+                currentAuthCookies = readAuthCookies;
             }
         }
-
-        if (currentToken.isSet()) {
+        
+        if (currentAuthCookies != null) {
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("OPTIONS");
-            AuthenticatedURL.injectToken(conn, currentToken);
+            AuthenticatedURL.injectCookies(conn, currentAuthCookies);
             if (conn.getResponseCode() == HttpURLConnection.HTTP_UNAUTHORIZED) {
                 AUTH_TOKEN_CACHE_FILE.delete();
-                currentToken = new AuthenticatedURL.Token();
+                currentAuthCookies = null;
             }
         }
-
-        if (!currentToken.isSet()) {
+        
+        if (currentAuthCookies == null) {
+            AuthenticatedURL.Token currentToken = new AuthenticatedURL.Token();
             Authenticator authenticator = getAuthenticator();
             try {
                 new AuthenticatedURL(authenticator).openConnection(url, currentToken);
@@ -132,12 +141,24 @@ public class AuthOozieClient extends XOozieClient {
                 throw new OozieClientException(OozieClientException.AUTHENTICATION,
                                                "Could not authenticate, " + ex.getMessage(), ex);
             }
+            if (authenticator instanceof AbstractAuthenticator) {
+                currentAuthCookies = ((AbstractAuthenticator) authenticator).getAuthenticatorCookies();
+            } else {
+                String t = currentToken.toString();
+                if (t != null) {
+                    if (!t.startsWith("\"")) {
+                      t = "\"" + t + "\"";
+                    }
+                    
+                    currentAuthCookies = AuthenticatedURL.AUTH_COOKIE + "=" + t;
+                }
+            }
         }
-        if (useAuthFile && currentToken.isSet() && !currentToken.equals(readToken)) {
-            writeAuthToken(currentToken);
+        if (useAuthFile && currentAuthCookies != null && !currentAuthCookies.equals(readAuthCookies)) {
+            writeAuthCookies(currentAuthCookies);
         }
         HttpURLConnection conn = super.createConnection(url, method);
-        AuthenticatedURL.injectToken(conn, currentToken);
+        AuthenticatedURL.injectCookies(conn, currentAuthCookies);
 
         return conn;
     }
@@ -165,6 +186,42 @@ public class AuthOozieClient extends XOozieClient {
             }
         }
         return authToken;
+    }
+    
+    protected String readAuthCookies() {
+        String authCookies = null;
+        if (AUTH_TOKEN_CACHE_FILE.exists()) {
+            try {
+              BufferedReader reader = new BufferedReader(new FileReader(AUTH_TOKEN_CACHE_FILE));
+              String line = reader.readLine();
+              reader.close();
+              if (line != null) {
+                  authCookies = line;
+              }
+            }
+            catch (IOException ex) {
+                //NOP
+            }
+        }
+        return authCookies;
+    }
+    
+    protected void writeAuthCookies(String authCookies) {
+        try {
+            Writer writer = new FileWriter(AUTH_TOKEN_CACHE_FILE);
+            writer.write(authCookies);
+            writer.close();
+            // sets read-write permissions to owner only
+            AUTH_TOKEN_CACHE_FILE.setReadable(false, false);
+            AUTH_TOKEN_CACHE_FILE.setReadable(true, true);
+            AUTH_TOKEN_CACHE_FILE.setWritable(true, true);
+        }
+        catch (IOException ioe) {
+            // if case of any error we just delete the cache, if user-only
+            // write permissions are not properly set a security exception
+            // is thrown and the file will be deleted.
+            AUTH_TOKEN_CACHE_FILE.delete();
+        }
     }
 
     /**
@@ -210,27 +267,38 @@ public class AuthOozieClient extends XOozieClient {
      */
     protected Authenticator getAuthenticator() throws OozieClientException {
         if (authOption != null) {
-            try {
-                Class<? extends Authenticator> authClass = getAuthenticators().get(authOption.toUpperCase());
-                if (authClass == null) {
-                    throw new OozieClientException(OozieClientException.AUTHENTICATION,
-                            "Authenticator class not found [" + authClass + "]");
-                }
-                return authClass.newInstance();
-            }
-            catch (IllegalArgumentException iae) {
-                throw new OozieClientException(OozieClientException.AUTHENTICATION, "Invalid options provided for auth: " + authOption
-                        + ", (" + AuthType.KERBEROS + " or " + AuthType.SIMPLE + " expected.)");
-            }
-            catch (InstantiationException ex) {
-                throw new OozieClientException(OozieClientException.AUTHENTICATION,
-                        "Could not instantiate Authenticator for option [" + authOption + "], " +
-                        ex.getMessage(), ex);
-            }
-            catch (IllegalAccessException ex) {
-                throw new OozieClientException(OozieClientException.AUTHENTICATION,
-                        "Could not instantiate Authenticator for option [" + authOption + "], " +
-                        ex.getMessage(), ex);
+            if(!authOption.equalsIgnoreCase("tokenauth")) {
+              try {
+                  Class<? extends Authenticator> authClass = getAuthenticators().get(authOption.toUpperCase());
+                  if (authClass == null) {
+                      throw new OozieClientException(OozieClientException.AUTHENTICATION,
+                              "Authenticator class not found [" + authClass + "]");
+                  }
+                  return authClass.newInstance();
+              }
+              catch (IllegalArgumentException iae) {
+                  throw new OozieClientException(OozieClientException.AUTHENTICATION, "Invalid options provided for auth: " + authOption
+                          + ", (" + AuthType.KERBEROS + " or " + AuthType.SIMPLE + " expected.)");
+              }
+              catch (InstantiationException ex) {
+                  throw new OozieClientException(OozieClientException.AUTHENTICATION,
+                          "Could not instantiate Authenticator for option [" + authOption + "], " +
+                          ex.getMessage(), ex);
+              }
+              catch (IllegalAccessException ex) {
+                  throw new OozieClientException(OozieClientException.AUTHENTICATION,
+                          "Could not instantiate Authenticator for option [" + authOption + "], " +
+                          ex.getMessage(), ex);
+              }
+            } else {
+              if (identityHttp == null) {
+                  throw new OozieClientException(OozieClientException.INVALID_INPUT,"Identity server http address is not available neither in command option or in the environment.");
+              }
+              if (authzHttp == null) {
+                  throw new OozieClientException(OozieClientException.INVALID_INPUT,"Authorization server http address is not available neither in command option or in the environment.");
+              }
+              HASClient hasClient = new HASClientImpl(identityHttp, authzHttp);
+              return new TokenAuthAuthenticator(hasClient);
             }
 
         }
@@ -272,6 +340,7 @@ public class AuthOozieClient extends XOozieClient {
     protected Map<String, Class<? extends Authenticator>> getAuthenticators() {
         Map<String, Class<? extends Authenticator>> authClasses = new HashMap<String, Class<? extends Authenticator>>();
         authClasses.put(AuthType.KERBEROS.toString(), KerberosAuthenticator.class);
+        authClasses.put(AuthType.TOKENAUTH.toString(), TokenAuthAuthenticator.class);
         authClasses.put(AuthType.SIMPLE.toString(), PseudoAuthenticator.class);
         authClasses.put(null, KerberosAuthenticator.class);
         return authClasses;
