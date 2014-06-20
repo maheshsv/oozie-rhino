@@ -82,6 +82,8 @@ public class OozieCLI {
     public static final String ENV_OOZIE_TIME_ZONE = "OOZIE_TIMEZONE";
     public static final String ENV_OOZIE_AUTH = "OOZIE_AUTH";
     public static final String WS_HEADER_PREFIX = "header:";
+    public static final String ENV_IDENTITY_HTTP = "IDENTITY_HTTP";
+    public static final String ENV_AUTHORIZATION_HTTP = "AUTHORIZATION_HTTP";
 
     public static final String HELP_CMD = "help";
     public static final String VERSION_CMD = "version";
@@ -96,6 +98,8 @@ public class OozieCLI {
     public static final String MR_CMD = "mapreduce";
     public static final String INFO_CMD = "info";
 
+    public static final String IDENTITY_HTTP_OPTION = "identity_http";
+    public static final String AUTHZ_HTTP_OPTION = "authz_http";
     public static final String OOZIE_OPTION = "oozie";
     public static final String CONFIG_OPTION = "config";
     public static final String SUBMIT_OPTION = "submit";
@@ -223,8 +227,12 @@ public class OozieCLI {
      * @param options the collection of options to add auth options
      */
     protected void addAuthOptions(Options options) {
-        Option auth = new Option(AUTH_OPTION, true, "select authentication type [SIMPLE|KERBEROS]");
+        Option auth = new Option(AUTH_OPTION, true, "select authentication type [SIMPLE|KERBEROS|TOKENAUTH]");
+        Option identityHTTP = new Option(IDENTITY_HTTP_OPTION, true, "set Identity server http address for tokenAuth");
+        Option authzHTTP = new Option(AUTHZ_HTTP_OPTION, true, "set Authorization server http address for tokenAuth");
         options.addOption(auth);
+        options.addOption(identityHTTP);
+        options.addOption(authzHTTP);
     }
 
     /**
@@ -798,6 +806,21 @@ public class OozieCLI {
         return authOpt;
     }
 
+    protected String getAuthzHttpOption(CommandLine commandLine) {
+        String authzOpt = commandLine.getOptionValue(AUTHZ_HTTP_OPTION);
+        if (authzOpt == null) {
+            authzOpt = System.getenv(ENV_AUTHORIZATION_HTTP);
+        }
+        return authzOpt;
+    }
+
+    protected String getIdentityHttpOption(CommandLine commandLine) {
+        String identityOpt = commandLine.getOptionValue(IDENTITY_HTTP_OPTION);
+        if (identityOpt == null) {
+            identityOpt = System.getenv(ENV_IDENTITY_HTTP);
+        }
+        return identityOpt;
+    }
     /**
      * Create a OozieClient.
      * <p/>
@@ -821,7 +844,9 @@ public class OozieCLI {
      * @throws OozieCLIException thrown if the XOozieClient could not be configured.
      */
     protected XOozieClient createXOozieClient(CommandLine commandLine) throws OozieCLIException {
-        XOozieClient wc = new AuthOozieClient(getOozieUrl(commandLine), getAuthOption(commandLine));
+        XOozieClient wc = new AuthOozieClient(getOozieUrl(commandLine),
+            getAuthOption(commandLine), getIdentityHttpOption(commandLine),
+            getAuthzHttpOption(commandLine));
         addHeader(wc);
         setDebugMode(wc,commandLine.hasOption(DEBUG_OPTION));
         return wc;

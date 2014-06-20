@@ -83,6 +83,7 @@
         the hadoop-auth artifact. After we phase-out pre 0.23 we can get rid of this property.
         -->
         <hadoop.auth.version>2.0.2-alpha</hadoop.auth.version>
+        <hadoop.tokenauth.version>3.0.0-SNAPSHOT</hadoop.tokenauth.version>
 
          <!-- Sharelib component versions -->
          <hive.version>0.10.0</hive.version>
